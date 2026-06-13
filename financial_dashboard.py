@@ -12,27 +12,38 @@ st.set_page_config(
 st.title("⚡ LeadAHead Electrical Financial Dashboard")
 
 
-FILE = "ledger.xlsx"
+import gspread
+from google.oauth2.service_account import Credentials
 
-# -------------------------------
-# LOAD DATA (SAFE)
-# -------------------------------
-
-
+# Required columns (move this ABOVE the Google Sheets load)
 required_cols = [
     "Date", "Account Type", "Type", "Category",
     "Subcategory", "Entity", "Amount"
 ]
 
-if os.path.exists(FILE):
-    df = pd.read_excel(FILE, engine="openpyxl")
+# Load credentials from Streamlit Secrets
+creds = Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"],
+    scopes=["https://www.googleapis.com/auth/spreadsheets"]
+)
 
-    # Add missing columns automatically
-    for col in required_cols:
-        if col not in df.columns:
-            df[col] = None
-else:
-    df = pd.DataFrame(columns=required_cols)
+client = gspread.authorize(creds)
+
+# Open your Google Sheet (USE ONLY THE ID)
+sheet = client.open_by_key("1hRkL3IDdhNfF4rtsVOMDDhMX2sxOoSEi6IEX8K_pO1Y").sheet1
+
+# Load data into DataFrame
+data = sheet.get_all_records()
+df = pd.DataFrame(data)
+
+# Ensure required columns exist
+for col in required_cols:
+    if col not in df.columns:
+        df[col] = None
+
+
+
+
 
 # Normalize Date column
 df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
