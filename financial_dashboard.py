@@ -318,76 +318,93 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
 
-def prepare_monthly_data(df):
+
+# -------------------------------
+# AI FORECASTING
+# -------------------------------
+
+def prepare_monthly_series(df):
     df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
     df = df.dropna(subset=['Date'])
-
     df['Month'] = df['Date'].dt.to_period('M').dt.to_timestamp()
 
+    # Revenue
     revenue = df[df['Account Type'] == 'Revenue'].groupby('Month')['Amount'].sum()
-    expense = df[df['Account Type'] == 'Expense'].groupby('Month')['Amount'].sum()
 
+    # COGS
+    cogs = df[(df['Account Type'] == 'Expense') & (df['Category'] == 'COGS')] \
+              .groupby('Month')['Amount'].sum()
+
+    # Net Income
+    expense = df[df['Account Type'] == 'Expense'].groupby('Month')['Amount'].sum()
     net_income = revenue - expense
 
-    monthly_df = pd.DataFrame({
-        'ds': net_income.index,   # Prophet requires 'ds'
-        'y': net_income.values    # Prophet requires 'y'
-    })
-
-    return monthly_df
+    return revenue, cogs, net_income
 
 
-def forecast_net_income(df):
-    if len(df) < 2:
+
+def run_prophet_forecast(series, label):
+    if len(series) < 2:
         return None
 
-    # Ensure proper datetime format and sorted order
+    df = pd.DataFrame({
+        'ds': series.index,
+        'y': series.values
+    })
+
     df = df.sort_values("ds").reset_index(drop=True)
     df['ds'] = pd.to_datetime(df['ds'])
 
     model = Prophet()
     model.fit(df)
 
-    # Use MS = Month Start (Prophet-friendly)
     future = model.make_future_dataframe(periods=3, freq='MS')
     forecast = model.predict(future)
 
-    # Rename columns to management-friendly labels
     forecast = forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']]
     forecast = forecast.rename(columns={
         'ds': 'Forecast Month',
-        'yhat': 'Projected Net Income',
-        'yhat_lower': 'Conservative Estimate',
-        'yhat_upper': 'Optimistic Estimate'
+        'yhat': f'Projected {label}',
+        'yhat_lower': f'Conservative {label}',
+        'yhat_upper': f'Optimistic {label}'
     })
 
-    # Format numbers with commas and 2 decimals
-    for col in ['Projected Net Income', 'Conservative Estimate', 'Optimistic Estimate']:
+    # Format numbers
+    for col in [f'Projected {label}', f'Conservative {label}', f'Optimistic {label}']:
         forecast[col] = forecast[col].apply(lambda x: float(f"{x:.2f}"))
 
     return forecast
 
 
 
+st.header("📈 AI Forecasts (Revenue, COGS, Net Income)")
 
-st.header("📈 AI Forecast (Next 3 Months)")
+revenue_series, cogs_series, net_income_series = prepare_monthly_series(df)
 
-monthly_df = prepare_monthly_data(df)
-forecast = forecast_net_income(monthly_df)
+# Run forecasts
+rev_fc = run_prophet_forecast(revenue_series, "Revenue")
+cogs_fc = run_prophet_forecast(cogs_series, "COGS")
+ni_fc = run_prophet_forecast(net_income_series, "Net Income")
 
-if forecast is None:
-    st.info("Not enough data to generate a forecast yet.")
-else:
-    # Line chart using management-friendly labels
-    chart_df = forecast.copy()
-    chart_df = chart_df.set_index('Forecast Month')
+# Helper to display each section
+def show_forecast(title, forecast, metric):
+    st.subheader(title)
 
-    st.line_chart(chart_df['Projected Net Income'])
+    if forecast is None:
+        st.info(f"Not enough data to forecast {metric}.")
+        return
 
-    # Display formatted table
+    chart_df = forecast.copy().set_index("Forecast Month")
+    st.line_chart(chart_df[f"Projected {metric}"])
+
     display_df = forecast.copy()
-    for col in ['Projected Net Income', 'Conservative Estimate', 'Optimistic Estimate']:
+    for col in [f"Projected {metric}", f"Conservative {metric}", f"Optimistic {metric}"]:
         display_df[col] = display_df[col].apply(lambda x: f"{x:,.2f}")
 
     st.dataframe(display_df)
+
+# Show each forecast
+show_forecast("📊 Revenue Forecast", rev_fc, "Revenue")
+show_forecast("📉 COGS Forecast", cogs_fc, "COGS")
+show_forecast("💰 Net Income Forecast", ni_fc, "Net Income")
 
