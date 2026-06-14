@@ -330,11 +330,12 @@ def prepare_monthly_data(df):
     net_income = revenue - expense
 
     monthly_df = pd.DataFrame({
-        'ds': net_income.index,
-        'y': net_income.values
+        'ds': net_income.index,   # Prophet requires 'ds'
+        'y': net_income.values    # Prophet requires 'y'
     })
 
     return monthly_df
+
 
 def forecast_net_income(df):
     if len(df) < 2:
@@ -351,7 +352,22 @@ def forecast_net_income(df):
     future = model.make_future_dataframe(periods=3, freq='MS')
     forecast = model.predict(future)
 
-    return forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']]
+    # Rename columns to management-friendly labels
+    forecast = forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']]
+    forecast = forecast.rename(columns={
+        'ds': 'Forecast Month',
+        'yhat': 'Projected Net Income',
+        'yhat_lower': 'Conservative Estimate',
+        'yhat_upper': 'Optimistic Estimate'
+    })
+
+    # Format numbers with commas and 2 decimals
+    for col in ['Projected Net Income', 'Conservative Estimate', 'Optimistic Estimate']:
+        forecast[col] = forecast[col].apply(lambda x: float(f"{x:.2f}"))
+
+    return forecast
+
+
 
 
 st.header("📈 AI Forecast (Next 3 Months)")
@@ -362,5 +378,16 @@ forecast = forecast_net_income(monthly_df)
 if forecast is None:
     st.info("Not enough data to generate a forecast yet.")
 else:
-    st.line_chart(forecast.set_index('ds')['yhat'])
-    st.write(forecast.tail(3))
+    # Line chart using management-friendly labels
+    chart_df = forecast.copy()
+    chart_df = chart_df.set_index('Forecast Month')
+
+    st.line_chart(chart_df['Projected Net Income'])
+
+    # Display formatted table
+    display_df = forecast.copy()
+    for col in ['Projected Net Income', 'Conservative Estimate', 'Optimistic Estimate']:
+        display_df[col] = display_df[col].apply(lambda x: f"{x:,.2f}")
+
+    st.dataframe(display_df)
+
