@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 from datetime import date
 from io import BytesIO
+from prophet import Prophet
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -51,6 +52,7 @@ df["Amount"] = pd.to_numeric(df["Amount"], errors="coerce")
 # -------------------------------
 # INPUT FORM (ADD TRANSACTION)
 # -------------------------------
+
 st.sidebar.header("➕ Add Transaction")
 
 with st.sidebar.form("entry"):
@@ -75,20 +77,25 @@ with st.sidebar.form("entry"):
 
     subcat = st.text_input("Subcategory")
     entity = st.text_input("Entity")
-    amount = st.number_input("Amount", min_value=0.0)
-    submit = st.form_submit_button("Save")
+    amt = st.number_input("Amount", min_value=0.0, format="%.2f")
 
-if submit:
-    sheet.append_row([
-        str(d),
-        acct_type,
-        t,
-        cat,
-        subcat,
-        entity,
-        float(amount)
-    ])
-    st.success("Transaction saved! Please refresh to see it in the table.")
+    submitted = st.form_submit_button("Add Transaction")
+
+    if submitted:
+        new_row = [
+            str(d),
+            acct_type,
+            t,
+            cat,
+            subcat,
+            entity,
+            float(amt)
+        ]
+
+        sheet.append_row(new_row)
+        st.success("Transaction added!")
+        st.rerun()
+
 
 # -------------------------------
 # DATA VIEW
@@ -310,3 +317,45 @@ st.download_button(
     file_name="ledger.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
+
+def prepare_monthly_data(df):
+    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+    df = df.dropna(subset=['Date'])
+
+    df['Month'] = df['Date'].dt.to_period('M').dt.to_timestamp()
+
+    revenue = df[df['Account Type'] == 'Revenue'].groupby('Month')['Amount'].sum()
+    expense = df[df['Account Type'] == 'Expense'].groupby('Month')['Amount'].sum()
+
+    net_income = revenue - expense
+
+    monthly_df = pd.DataFrame({
+        'ds': net_income.index,
+        'y': net_income.values
+    })
+
+    return monthly_df
+
+def forecast_net_income(df):
+    if len(df) < 2:
+        return None
+
+    model = Prophet()
+    model.fit(df)
+
+    future = model.make_future_dataframe(periods=3, freq='M')
+    forecast = model.predict(future)
+
+    return forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']]
+
+
+st.header("📈 AI Forecast (Next 3 Months)")
+
+monthly_df = prepare_monthly_data(df)
+forecast = forecast_net_income(monthly_df)
+
+if forecast is None:
+    st.info("Not enough data to generate a forecast yet.")
+else:
+    st.line_chart(forecast.set_index('ds')['yhat'])
+    st.write(forecast.tail(3))
