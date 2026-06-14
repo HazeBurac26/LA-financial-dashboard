@@ -340,10 +340,15 @@ def forecast_net_income(df):
     if len(df) < 2:
         return None
 
+    # Ensure proper datetime format and sorted order
+    df = df.sort_values("ds").reset_index(drop=True)
+    df['ds'] = pd.to_datetime(df['ds'])
+
     model = Prophet()
     model.fit(df)
 
-    future = model.make_future_dataframe(periods=3, freq='M')
+    # Use MS = Month Start (Prophet-friendly)
+    future = model.make_future_dataframe(periods=3, freq='MS')
     forecast = model.predict(future)
 
     return forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']]
